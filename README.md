@@ -41,31 +41,33 @@ Para resolver esse gargalo e sustentar **3.000 requisições por segundo estáve
 
 ```mermaid
 flowchart TD
-    Client["Merchants / Clientes / Apps"] -->|3.000 req/s| Nginx["Nginx Reverse Proxy (Keep-Alive Pooling)"]
+    Client["Merchants / Clientes / Apps"] -->|"3.000 req/s"| Nginx["Nginx Reverse Proxy (Keep-Alive Pooling)"]
 
     subgraph IngestionCluster["1. Camada de Ingestão Desacoplada (Java 21 Virtual Threads)"]
         Nginx --> API1["Gateway Nó 1 (Tomcat + Virtual Threads)"]
         Nginx --> API2["Gateway Nó 2 (Tomcat + Virtual Threads)"]
         
-        API1 -->|Fast LPUSH & 200 QUEUED em 0.65ms| Queue[("Redis 7: Fila FIFO de Ingestão")]
-        API2 -->|Fast LPUSH & 200 QUEUED em 0.65ms| Queue
+        API1 -->|"Fast LPUSH & 200 QUEUED em 0.65ms"| Queue[("Redis 7: Fila FIFO de Ingestão")]
+        API2 -->|"Fast LPUSH & 200 QUEUED em 0.65ms"| Queue
     end
 
     subgraph WorkerCluster["2. Processamento Assíncrono Concorrente (256 Virtual Threads)"]
-        Queue -->|RPOP Cooperativo Backoff 20ms| W1["Worker Pool Nó 1 (128 Threads)"]
-        Queue -->|RPOP Cooperativo Backoff 20ms| W2["Worker Pool Nó 2 (128 Threads)"]
+        Queue -->|"RPOP Cooperativo Backoff 20ms"| W1["Worker Pool Nó 1 (128 Threads)"]
+        Queue -->|"RPOP Cooperativo Backoff 20ms"| W2["Worker Pool Nó 2 (128 Threads)"]
     end
 
     subgraph Resilience["3. Roteamento Inteligente & Circuit Breaker"]
-        W1 & W2 --> Router{"Avaliador de Saúde (Cache Local 250ms)"}
-        Router -->|Fluxo Primário (Taxa 7%)| DefaultPP["Adquirente Principal (Porta 8001)"]
-        Router -.->|Failover em Voo (Taxa 10%)| FallbackPP["Adquirente Contingência (Porta 8002)"]
+        W1 --> Router{"Avaliador de Saúde (Cache Local 250ms)"}
+        W2 --> Router
+        Router -->|"Fluxo Primário (Taxa 7%)"| DefaultPP["Adquirente Principal (Porta 8001)"]
+        Router -.->|"Failover em Voo (Taxa 10%)"| FallbackPP["Adquirente Contingência (Porta 8002)"]
     end
 
     subgraph Ledger["4. Livro-Razão Temporal O(log N)"]
-        W1 & W2 -->|ZADD epoch_milli| Audit[("Redis Sorted Sets: Auditoria Temporal")]
-        DefaultPP --> DB1[(PostgreSQL Adquirente 1)]
-        FallbackPP --> DB2[(PostgreSQL Adquirente 2)]
+        W1 -->|"ZADD epoch_milli"| Audit[("Redis Sorted Sets: Auditoria Temporal")]
+        W2 --> Audit
+        DefaultPP --> DB1[("PostgreSQL Adquirente 1")]
+        FallbackPP --> DB2[("PostgreSQL Adquirente 2")]
     end
 ```
 
