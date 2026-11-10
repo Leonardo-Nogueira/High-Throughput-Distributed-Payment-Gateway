@@ -1,0 +1,103 @@
+services:
+  # Load Balancer Nginx expondo a porta 9999
+  nginx:
+    image: nginx:alpine
+    container_name: payment-gateway-nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "9999:9999"
+    depends_on:
+      - api1
+      - api2
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: "128MB"
+    networks:
+      - gateway-network
+      - payment-processor
+
+  # Instância 1 do Backend Java 21
+  api1:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: payment-gateway-api-1
+    environment:
+      - SERVER_PORT=8080
+      - GATEWAY_REDIS_HOST=redis
+      - GATEWAY_REDIS_PORT=6379
+      - GATEWAY_DEFAULT_URL=http://payment-processor-default:8080
+      - GATEWAY_FALLBACK_URL=http://payment-processor-fallback:8080
+      - GATEWAY_TIMEOUT_MS=2500
+      - GATEWAY_WORKER_CONCURRENCY=128
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: "384MB"
+    networks:
+      - gateway-network
+      - payment-processor
+
+  # Instância 2 do Backend Java 21
+  api2:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: payment-gateway-api-2
+    environment:
+      - SERVER_PORT=8080
+      - GATEWAY_REDIS_HOST=redis
+      - GATEWAY_REDIS_PORT=6379
+      - GATEWAY_DEFAULT_URL=http://payment-processor-default:8080
+      - GATEWAY_FALLBACK_URL=http://payment-processor-fallback:8080
+      - GATEWAY_TIMEOUT_MS=2500
+      - GATEWAY_WORKER_CONCURRENCY=128
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: "384MB"
+    networks:
+      - gateway-network
+      - payment-processor
+
+  # Redis para Fila Assíncrona e Auditoria Temporal
+  redis:
+    image: redis:7-alpine
+    container_name: payment-gateway-redis
+    command: ["redis-server", "--appendonly", "no", "--save", "", "--maxmemory", "192mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: "256MB"
+    networks:
+      - gateway-network
+      - payment-processor
+
+  # Dashboard Oficial Visual do Redis (Redis Insight Web)
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: payment-gateway-redis-insight
+    ports:
+      - "5540:5540"
+    depends_on:
+      - redis
+    networks:
+      - gateway-network
+
+networks:
+  gateway-network:
+    driver: bridge
+  payment-processor:
+    external: true
